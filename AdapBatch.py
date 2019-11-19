@@ -26,37 +26,51 @@ criterion = nn.CrossEntropyLoss()
 optimizer = optim.SGD(resnet.parameters(), lr=0.01)
 
 adapt = True  # while this is true, the algorithm will perform batch adaptation
-batch_size = 2  # initial batch size.
+gpu_batch_size = 2  # initial gpu batch_size, it can be super small
+train_batch_size = 2048  # the train batch size of desire
 continue_training = True  # criteria to stop the training
 
 # Example of training loop
 while continue_training:
 
     # Dataloader has to be reinicialized for each new batch size.
-    print(f"current batch: {batch_size}")
+    print(f"current batch: {gpu_batch_size}")
     trainloader = torch.utils.data.DataLoader(trainset,
-                                              batch_size=int(batch_size),
+                                              batch_size=int(gpu_batch_size),
                                               shuffle=True)
+
+    # Number of repetitions for batch spoofing
+    repeat = max(1, int(train_batch_size/gpu_batch_size))
+
     try:
+
+        optimizer.zero_grad()
+
         for i, (x, y) in tqdm(enumerate(trainloader)):
-            optimizer.zero_grad()
 
             y_pred = resnet(x.to(device))
 
             loss = criterion(y_pred, y.to(device))
             loss.backward()
-            optimizer.step()
 
+            # batch spoofing
+            if not i % repeat:
+                optimizer.step()
+                optimizer.zero_grad()
+
+            # Increase batch size and get out of the loop
             if adapt:
-                batch_size *= 2
+                gpu_batch_size *= 2
                 break
 
-            if i > 3:
+            if i > 1000:
                 continue_training = False
 
     # CUDA out of memory is a RuntimeError, the moment we will get to it when our batch size is too large.
     except RuntimeError:
-        batch_size /= 2  # resize the batch size for the biggest that works in memory
-        print(f"largest batch size found = {batch_size}")
+        # This implementation only allows for powers of 2. Which can be seen as rough tuning. Extention to fine tunning
+        # will require a few more lines of code, but should also be possible.
+        gpu_batch_size /= 2  # resize the batch size for the biggest that works in memory
+        print(f"largest batch size found = {gpu_batch_size}")
         adapt = False  # turn off the batch adaptation
 
